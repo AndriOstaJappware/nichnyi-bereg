@@ -69,6 +69,21 @@ html,body{height:100%;margin:0;background:var(--ink);color:var(--text);font-fami
 #go:focus-visible{outline:3px solid #fff;outline-offset:3px}
 #err{color:var(--danger);font-size:14px;margin-top:12px}
 .hidden{display:none!important}
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(8,10,16,.62)}
+.mcard{width:min(560px,100%);max-height:100%;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:24px 26px;backdrop-filter:blur(6px);display:flex;flex-direction:column;gap:12px}
+.mcard h2{font-family:var(--font-display);font-weight:400;color:var(--accent);margin:0;font-size:24px;text-wrap:balance}
+.mcard p{margin:0;color:var(--dim);font-size:15px;line-height:1.45}
+#qText{font-size:19px;color:var(--text);line-height:1.35}
+.qopt{text-align:left;font:inherit;font-size:16.5px;color:var(--text);background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:8px;padding:12px 14px;cursor:pointer}
+.qopt:hover{border-color:var(--accent)}
+.qopt:focus-visible,.mbtn:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.qopt.good{background:#1f7a48;border-color:var(--cash)}
+.qopt.bad{background:#8a2630;border-color:var(--danger)}
+#finBonus{font-family:var(--font-display);font-size:68px;line-height:1;color:var(--cash)}
+#finList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;font-size:15.5px}
+#finList .ok{color:var(--cash)} #finList .no{color:var(--dim)}
+.mbtn{font-family:var(--font-display);font-size:16px;border:0;border-radius:6px;padding:11px 20px;cursor:pointer;background:var(--accent);color:#1a1200}
+.mbtn.alt{background:rgba(255,255,255,.12);color:var(--text)}
 @media (max-width:640px){#map{width:120px;height:120px}#spd{font-size:32px}#money{font-size:22px}.bar{width:130px}}
 @media (prefers-reduced-motion:reduce){#stars.evade b.on{animation:none}#big,#fade{transition:none}}
 </style>
@@ -94,6 +109,16 @@ html,body{height:100%;margin:0;background:var(--ink);color:var(--text);font-fami
 <div id="big" class="hud"></div>
 <div id="fade"></div>
 
+<div id="quiz" class="modal hidden"><div class="mcard">
+  <h2>Демка для клієнта</h2><p id="qNum"></p><div id="qText"></div>
+  <button type="button" class="qopt" data-i="0"></button><button type="button" class="qopt" data-i="1"></button><button type="button" class="qopt" data-i="2"></button>
+  <p>Натисніть 1, 2 або 3. Щоб демка вдалася, потрібні дві правильні відповіді з трьох.</p>
+</div></div>
+<div id="finale" class="modal hidden"><div class="mcard">
+  <h2>Кампанію пройдено. Бонус до зарплати</h2><div id="finBonus">$1</div><ul id="finList"></ul>
+  <p>Це ігровий бонус. Справжній узгоджуйте з директором.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" class="mbtn" id="finGo">Грати далі</button><button type="button" class="mbtn alt" id="finAgain">Пройти кампанію знову</button></div>
+</div></div>
 <div id="start">
   <div id="card">
     <h1>НІЧНИЙ БЕРЕГ</h1>
@@ -866,12 +891,13 @@ function aiDrive(c,dt){
   else thr = vf<target-.5?1:(vf>target+2?-1:0);
   carPhysics(c,thr,st,hb,dt);
 }
+const ref=()=>player.inside?DOOR:player;
 function roadSpawn(minD,maxD,parked){
   for(let k=0;k<40;k++){
     const i=RI(0,N), j=RI(0,N), d=RI(0,3); if(!validDir(i,j,d)) continue;
     const t=parked?R(15,65):R(16,40), off=parked?7.3:LANE;
     const x=nodeP(i)+DX[d]*t-DZ[d]*off, z=nodeP(j)+DZ[d]*t+DX[d]*off;
-    const dd=Math.hypot(x-player.x,z-player.z); if(dd<minD||dd>maxD) continue;
+    const rf=ref(), dd=Math.hypot(x-rf.x,z-rf.z); if(dd<minD||dd>maxD) continue;
     let ok=true; for(const c of cars) if(dist2(c.x,c.z,x,z)<90){ok=false;break;}
     if(ok) return {x,z,h:Math.atan2(DX[d],DZ[d]),i,j,d};
   }
@@ -1008,6 +1034,7 @@ const npcs=[];
 function nearNPC(){ if(player.car) return null; for(const n of npcs) if(dist2(n.x,n.z,player.x,player.z)<7.5) return n; return null; }
 function talkNPC(){ const n=nearNPC(); if(!n||state!=='play') return;
   if(n.role==='директор'){
+    if(!Q.done&&Q.stage===4&&M.phase!=='active') return startIT(4);
     if(n.cool>0) return toast('Директор: «Премію вже видав. До роботи!»');
     n.cool=240; player.money+=1000; beep(660,.1,.3); beep(990,.16,.3,.1); big('ДИРЕКТОР JAPPWARE','«Гарна робота. Тримай премію»: +₴1000','#f9cf0b');
   } else {
@@ -1016,7 +1043,7 @@ function talkNPC(){ const n=nearNPC(); if(!n||state!=='play') return;
     if(wanted>0&&wanted<=2){ wanted=0; evadeT=0; extra=' Питання з поліцією залагоджено.'; }
     beep(700,.1,.3); beep(1050,.16,.3,.1); big('HR JAPPWARE','«Як ти? Візьми каву й видихни». Здоров\u2019я відновлено.'+extra,'#f9cf0b');
   } }
-function updateNPCs(dt){ for(const n of npcs){ if(n.cool>0) n.cool-=dt; n.ph+=dt;
+function updateNPCs(dt){ for(const n of npcs){ if(n.cool>0) n.cool-=dt; n.ph+=dt; if(n.ex) n.ex.visible=!Q.done&&Q.stage===4&&M.phase!=='active';
     const dx=player.x-n.x, dz=player.z-n.z, d2=dx*dx+dz*dz;
     n.h+=angDiff(d2<90&&!player.car?Math.atan2(dx,dz):n.h0,n.h)*Math.min(1,dt*4); n.g.rotation.y=n.h;
     const u=n.g.userData, a=Math.sin(n.ph*1.3)*.05; u.la.rotation.x=a; u.ra.rotation.x=-a; u.la.rotation.z=-.06; u.ra.rotation.z=.06;
@@ -1025,6 +1052,15 @@ function updateNPCs(dt){ for(const n of npcs){ if(n.cool>0) n.cool-=dt; n.ph+=dt
 const IX=2000, IZ=0, DOOR={x:blockC(OFF.bi)-21.3,z:blockC(OFF.bj)}, COFFEE={x:IX-11,z:IZ-8.3,cool:0};
 const interior=new THREE.Group(); interior.visible=false; scene.add(interior);
 const staff=[];
+const STAFF=[
+  {name:'Стас',role:'розробник',src:'',skin:0xd2a48b,hair:0x15110e,shirt:0xe8e6e1,stage:3,line:'«Ще один матч у FIFA на PS, і сідаю за таску»'},
+  {name:'Валентин',role:'розробник',src:'',skin:0xcfb0a4,hair:0x2a1d16,shirt:0x2b2f3a,stage:1,line:'«Слухай, а проведи демку замість мене?»'},
+  {name:'Олег',role:'розробник',src:'',skin:0xc3927f,hair:0x6a4a30,shirt:0x2f6f9a,stage:2,line:'«Зроблю любе голубе. Що треба?»'},
+  {name:'Макс',role:'сисадмін',src:'',skin:0xbb867d,hair:0x4a3020,shirt:0xb9a88a,stage:0,line:'«А ти пробував вимкнути й увімкнути?»'}
+];
+function exclSprite(){ const k=cv(64,64), q=k.getContext('2d'); q.fillStyle='#f9cf0b'; q.beginPath(); q.arc(32,32,28,0,7); q.fill(); q.fillStyle='#14161a'; q.font='900 46px Arial'; q.textAlign='center'; q.textBaseline='middle'; q.fillText('!',32,35);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(k),depthWrite:false,fog:false,toneMapped:false})); sp.scale.set(.42,.42,1); sp.position.y=2.72; sp.visible=false; return sp; }
+npcs[0].ex=exclSprite(); npcs[0].g.add(npcs[0].ex);
 {
   const add=m=>{ interior.add(m); return m; };
   const wall=new THREE.MeshStandardMaterial({color:col(0xcfccc5),roughness:.95,envMapIntensity:.4});
@@ -1060,12 +1096,17 @@ const staff=[];
   const sc=cv(128,72), sq=sc.getContext('2d'); sq.fillStyle='#11151c'; sq.fillRect(0,0,128,72);
   for(let y=6;y<68;y+=6){ let x=6+RI(0,3)*6; for(let k=0;k<RI(2,5);k++){ const w=R(8,26); sq.fillStyle=pick(['#f9cf0b','#6cc7ff','#b6f09c','#e6e6e6','#ff8a8a']); sq.fillRect(x,y,w,2.5); x+=w+4; } }
   const screen=new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sc),toneMapped:false});
+  const pc=cv(128,72), pq=pc.getContext('2d'); for(let x=0;x<128;x+=16){ pq.fillStyle=x%32?'#2f9e4f':'#2a8f47'; pq.fillRect(x,0,16,72); }
+  pq.strokeStyle='#fff'; pq.lineWidth=2; pq.strokeRect(4,4,120,64); pq.beginPath(); pq.moveTo(64,4); pq.lineTo(64,68); pq.stroke(); pq.beginPath(); pq.arc(64,36,11,0,7); pq.stroke(); pq.strokeRect(4,22,16,28); pq.strokeRect(108,22,16,28);
+  const pitch=new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(pc),toneMapped:false});
   for(let k=0;k<4;k++){ const dx=IX-4+k*4.3, dz=IZ-7;
     add(box(wood,1.8,.05,.8,dx,1.05,dz)); add(box(darkMat,.07,1.03,.6,dx-.82,.52,dz)); add(box(darkMat,.07,1.03,.6,dx+.82,.52,dz));
-    add(box(darkMat,.72,.43,.04,dx,1.43,dz-.26)); add(box(darkMat,.06,.16,.06,dx,1.14,dz-.27));
-    const sm=add(new THREE.Mesh(new THREE.PlaneGeometry(.66,.37),screen)); sm.position.set(dx,1.43,dz-.238);
-    add(box(darkMat,.42,.02,.14,dx,1.085,dz+.12)); addCollider(dx-.9,dx+.9,dz-.4,dz+.4,1.05);
-    const p=makePerson(pick(SHIRTS),pick(PANTS),pick(SKIN),pick(HAIR)); p.position.set(dx,0,dz+.9); p.rotation.y=Math.PI; p.visible=false; staff.push(p); }
+    add(box(darkMat,.72,.43,.04,dx,1.43,dz+.26)); add(box(darkMat,.06,.16,.06,dx,1.14,dz+.27));
+    const sm=add(new THREE.Mesh(new THREE.PlaneGeometry(.66,.37),k===0?pitch:screen)); sm.position.set(dx,1.43,dz+.238); sm.rotation.y=Math.PI;
+    add(box(darkMat,.42,.02,.14,dx,1.085,dz-.12)); addCollider(dx-.9,dx+.9,dz-.4,dz+.4,1.05);
+    const d=STAFF[k], p=makePerson(d.shirt,pick(PANTS),d.skin,d.hair,.42); addFace(p,d.src);
+    const lb=labelSprite((d.name+' · '+d.role).toUpperCase()); lb.scale.set(1.9,.36,1); p.add(lb); const ex=exclSprite(); p.add(ex);
+    p.position.set(dx,0,dz-.9); p.visible=false; staff.push(Object.assign({g:p,x:dx,z:dz-.9,h:0,ex},d)); }
   // director's desk
   add(box(wood,1.1,.06,2.8,IX+10,.78,IZ)); add(box(jPanel,.9,.75,.08,IX+10,.38,IZ-1.3)); add(box(jPanel,.9,.75,.08,IX+10,.38,IZ+1.3)); add(box(jPanel,.06,.6,2.6,IX+9.55,.45,IZ));
   add(box(darkMat,.3,.02,.42,IX+10.1,.82,IZ)); { const m=add(new THREE.Mesh(new THREE.PlaneGeometry(.4,.26),screen)); m.position.set(IX+9.95,.95,IZ); m.rotation.y=Math.PI/2; m.rotation.z=0; }
@@ -1099,14 +1140,24 @@ const nearCoffee=()=>!!player.inside&&dist2(player.x,player.z,COFFEE.x,COFFEE.z)
 function interact(){ if(state!=='play') return;
   if(nearDoor()) return useDoor(!player.inside);
   if(nearCoffee()){ if(COFFEE.cool>0) return toast('Кавомашина ще гріється'); COFFEE.cool=60; player.health=Math.min(100,player.health+35); beep(520,.08,.2); return toast('Кава: +35 до здоров\u2019я'); }
+  const sp=nearStaff(); if(sp) return talkStaff(sp);
   talkNPC(); }
+function nearStaff(){ if(!player.inside) return null; for(const p of staff) if(dist2(p.x,p.z,player.x,player.z)<7) return p; return null; }
+function talkStaff(p){
+  if(M.phase==='active') return toast(p.name+': «Спершу закінчи поточне завдання»');
+  if(!Q.done&&Q.stage===p.stage) return startIT(p.stage);
+  toast(p.name+': '+p.line); beep(440,.06,.15); }
 function updateInterior(dt){
   if(COFFEE.cool>0) COFFEE.cool-=dt;
-  const v=!!player.inside; if(interior.visible!==v){ interior.visible=v; for(const p of staff) p.visible=v; }
+  const v=!!player.inside; if(interior.visible!==v){ interior.visible=v; for(const p of staff) p.g.visible=v; }
   if(!v) return;
   sun.intensity=0; hemi.intensity=.45; hemi.color.setRGB(1,.96,.9); hemi.groundColor.setRGB(.45,.38,.3); for(const l of lampLights) l.intensity=.5; headLamp.intensity=0;
   scene.fog.near=300; scene.fog.far=900; rainMesh.visible=false; renderer.toneMappingExposure=1;
-  const t=performance.now()*.001; staff.forEach((p,i)=>{ const u=p.userData; u.la.rotation.x=-1.15+Math.sin(t*9+i)*.05; u.ra.rotation.x=-1.15+Math.cos(t*8+i*2)*.05; });
+  const t=performance.now()*.001; staff.forEach((p,i)=>{ const u=p.g.userData, dx=player.x-p.x, dz=player.z-p.z, d2=dx*dx+dz*dz, near=d2<11;
+    p.h+=angDiff(near?Math.atan2(dx,dz):0,p.h)*Math.min(1,dt*5); p.g.rotation.y=p.h;
+    const a=near?0:-1.15; u.la.rotation.x+=(a+(near?0:Math.sin(t*9+i)*.05)-u.la.rotation.x)*Math.min(1,dt*8); u.ra.rotation.x+=(a+(near?0:Math.cos(t*8+i*2)*.05)-u.ra.rotation.x)*Math.min(1,dt*8);
+    p.ex.visible=!Q.done&&Q.stage===p.stage&&M.phase!=='active';
+    if(d2<.5&&d2>1e-4){ const d=Math.sqrt(d2); player.x=p.x+dx/d*.71; player.z=p.z+dz/d*.71; } });
 }
 /* ---------- particles, tracers, pickups ---------- */
 const parts=[];
@@ -1167,13 +1218,13 @@ const mark={on:false,x:0,z:0,color:'#ffc21a'};
 function setMarker(x,z,hex){ mark.on=true; mark.x=x; mark.z=z; mark.color=hex||'#ffc21a'; marker.visible=true; marker.position.set(x,0,z); mkMat.color.set(mark.color); mkBeam.color.set(mark.color); }
 function hideMarker(){ mark.on=false; marker.visible=false; }
 function roadPoint(minD,maxD){ for(let k=0;k<60;k++){ const i=RI(0,N), j=RI(0,N), d=RI(0,3); if(!validDir(i,j,d)) continue; const t=R(18,62);
-  const x=nodeP(i)+DX[d]*t-DZ[d]*LANE, z=nodeP(j)+DZ[d]*t+DX[d]*LANE, dd=Math.hypot(x-player.x,z-player.z); if(dd>=minD&&dd<=maxD) return [x,z]; }
+  const x=nodeP(i)+DX[d]*t-DZ[d]*LANE, z=nodeP(j)+DZ[d]*t+DX[d]*LANE, dd=Math.hypot(x-ref().x,z-ref().z); if(dd>=minD&&dd<=maxD) return [x,z]; }
   return [nodeP(4)+LANE,nodeP(4)+30]; }
-const M={phase:'cool',kind:-1,t:2,step:0,total:0,timer:0,car:null,reward:0};
+const M={phase:'cool',kind:-1,t:2,step:0,total:0,timer:0,car:null,reward:0,it:-1,pace:0,pad:0};
 const KINDS=['Кур’єр','Авто на замовлення','Гарячий слід'];
-function missionOffer(){ M.kind=(M.kind+1)%3; M.phase='idle'; const p=roadPoint(50,170); setMarker(p[0],p[1],'#ffc21a');
+function missionOffer(){ M.it=-1; M.pace=0; M.pad=0; M.kind=(M.kind+1)%3; M.phase='idle'; const p=roadPoint(50,170); setMarker(p[0],p[1],'#ffc21a');
   setMission('Нове замовлення', 'Їдьте до жовтої позначки на мапі: «'+KINDS[M.kind]+'».'); }
-function nextStop(){ const p=roadPoint(130,300); setMarker(p[0],p[1],'#38d6ff'); M.timer+=Math.hypot(p[0]-player.x,p[1]-player.z)/8.5+9; }
+function nextStop(){ const p=roadPoint(130,300); setMarker(p[0],p[1],'#38d6ff'); M.timer+=Math.hypot(p[0]-ref().x,p[1]-ref().z)/(M.pace||8.5)+(M.pad||9); }
 function missionStart(){
   M.phase='active'; M.step=0; beep(520,.1,.3); beep(780,.14,.3,.1);
   if(M.kind===0){ M.total=4; M.timer=0; M.reward=900; nextStop(); big('КУР’ЄР','Розвезіть 4 пакунки, поки не сплив час'); }
@@ -1183,29 +1234,89 @@ function missionStart(){
   missionText();
 }
 function missionText(){
+  if(M.it>=0) return setMission('Завдання '+(M.it+1)+' з 5 · '+IT[M.it].title, IT[M.it].text());
   if(M.kind===0) setMission(KINDS[0],'Пакунок '+(M.step+1)+' з '+M.total+'. Їдьте до блакитної позначки.');
   else if(M.kind===1) setMission(KINDS[1], M.step===0?'Знайдіть рожеве купе за позначкою і сядьте в нього.':'Відвезіть купе покупцю. Кожна подряпина зменшує оплату.');
   else setMission(KINDS[2],'Вас розшукують. Зникніть з очей поліції, доки зірки не згаснуть.');
 }
+const Q={stage:0,done:false,bonus:0,perf:{}};
+try{ const sv=JSON.parse(localStorage.getItem('nb.campaign')||'null'); if(sv&&typeof sv.stage==='number'){ Q.stage=clamp(sv.stage|0,0,5); Q.done=!!sv.done; Q.bonus=sv.bonus|0; Q.perf=sv.perf&&typeof sv.perf==='object'?sv.perf:{}; if(Q.stage>=5) Q.done=true; } }catch(e){}
+const saveQ=()=>{ try{ localStorage.setItem('nb.campaign',JSON.stringify(Q)); }catch(e){} };
+const IT=[
+  {giver:'Макс', title:'Сервер упав', reward:800, intro:'Перезавантажте три сервери, поки клієнти не помітили', text:()=>'Макс: «Прод лежить!» Сервер '+(M.step+1)+' з '+M.total+': їдьте до блакитної позначки.'},
+  {giver:'Валентин', title:'Демка замість Валентина', reward:1000, intro:'Встигніть до клієнта й проведіть демо', text:()=>'Валентин: «Проведи демку замість мене». Їдьте до клієнта за блакитною позначкою: там три запитання.'},
+  {giver:'Олег', title:'Любе голубе', reward:1200, intro:'Клієнт хоче будь-що, аби голубе', text:()=>M.step===0?'Олег: «Зроблю любе голубе». Знайдіть голубе авто за позначкою і сядьте в нього.':'Привезіть голубе авто до офісу Jappware цілим.'},
+  {giver:'Стас', title:'Баг у продакшені', reward:1400, intro:'Баг тікає містом. Наздоженіть зелене авто', text:()=>'Стас: «Я б сам, але в мене матч у FIFA». Таранте зелене авто з багом або стріляйте по ньому, доки не зупиниться.'},
+  {giver:'Директор', title:'Реліз у п\u2019ятницю ввечері', reward:2000, intro:'Build, Test, Staging, Deploy, Monitoring. Під дощем і на час', text:()=>'Етап «'+['Build','Test','Staging','Deploy','Monitoring'][Math.min(4,M.step)]+'», '+(M.step+1)+' з 5: їдьте до блакитної позначки.'}
+];
+function campaignHint(){ M.phase='wait'; hideMarker(); const g=IT[Q.stage].giver;
+  setMission('Завдання '+(Q.stage+1)+' з 5', (g==='Директор'?'Усі готові до релізу. Поговоріть із директором Jappware':'Зайдіть в офіс Jappware і поговоріть із колегою на ім\u2019я '+g)+' (клавіша E).'); }
+function startIT(i){
+  M.it=i; M.phase='active'; M.step=0; M.timer=0; M.reward=IT[i].reward; M.car=null; M.pace=8.5; M.pad=9;
+  if(i===0){ M.kind=0; M.total=3; nextStop(); }
+  else if(i===1){ M.kind=0; M.total=1; M.pace=9.5; M.pad=16; nextStop(); }
+  else if(i===2){ M.kind=1; const sp=roadSpawn(150,330,true)||roadSpawn(60,500,true)||{x:nodeP(6)+7.3,z:nodeP(6)+30,h:0}; M.car=makeCar('sedan',sp.x,sp.z,sp.h,0x1e6fe6); M.car.mission=true; setMarker(sp.x,sp.z,'#4aa3ff'); }
+  else if(i===3){ M.kind=3; const sp=roadSpawn(120,260,false)||roadSpawn(60,500,false), c=makeCar('sport',sp?sp.x:nodeP(6)+LANE,sp?sp.z:nodeP(6)+30,sp?sp.h:0,0x35d04a);
+    c.driver='ai'; c.ai=newAI(); if(sp){ c.ai.i=sp.i; c.ai.j=sp.j; c.ai.d=sp.d; wpA(c.ai); } else navInit(c,false); c.ai.panic=1e9; c.mission=true; M.car=c; setMarker(c.x,c.z,'#5dff7a'); }
+  else { M.kind=0; M.total=5; M.pace=9.6; M.pad=7; raining=true; rainT=220; nextStop(); }
+  big(IT[i].title.toUpperCase(),IT[i].intro); beep(520,.1,.3); beep(780,.14,.3,.1); missionText();
+  if(player.inside) toast('Вийдіть з офісу: таймер піде надворі');
+}
+function finale(){ const p=Q.perf, items=[['Кампанію пройдено',true],['Демка: три правильні відповіді з трьох',!!p.quiz],['Голубе авто без подряпин',!!p.blue],['Реліз із запасом часу',!!p.fast],['Без лікарні й затримань',!p.died]];
+  Q.bonus=items.filter(x=>x[1]).length; Q.done=true; saveQ();
+  setTimeout(()=>{ $('finList').innerHTML=items.map(x=>'<li class="'+(x[1]?'ok':'no')+'">'+(x[1]?'+$1 · ':'$0 · ')+x[0]+'</li>').join(''); $('finBonus').textContent='$'+Q.bonus;
+    $('finale').classList.remove('hidden'); firing=false; for(const k in keys) keys[k]=false; try{ document.exitPointerLock(); }catch(e){} },2800); }
+$('finGo').addEventListener('click',()=>$('finale').classList.add('hidden'));
+$('finAgain').addEventListener('click',()=>{ Q.stage=0; Q.done=false; Q.bonus=0; Q.perf={}; saveQ(); $('finale').classList.add('hidden'); if(M.phase!=='active'){ M.phase='cool'; M.t=.5; } });
+const QUIZ=[
+  ['Що означає HTTP-статус 404?',['Сторінку не знайдено','Внутрішня помилка сервера','Доступ заборонено']],
+  ['Якою командою створити нову гілку в git і перейти на неї?',['git checkout -b feature','git push --new feature','git fork feature']],
+  ['Що таке CI/CD?',['Безперервна інтеграція та доставка','Мова програмування','Тип бази даних']],
+  ['Скільки бітів у байті?',['8','10','16']],
+  ['Що робить SQL-команда SELECT?',['Читає дані з таблиці','Видаляє таблицю','Створює користувача']],
+  ['Що таке pull request?',['Запит на злиття змін у гілку','Запит на відпустку','Скидання пароля']],
+  ['Який порт типовий для HTTPS?',['443','80','22']],
+  ['Що означає «задеплоїти»?',['Розгорнути версію на сервері','Написати тести','Видалити старий код']],
+  ['Що таке API?',['Інтерфейс для взаємодії програм','Антивірус','Формат зображень']],
+  ['Що з цього є системою контролю версій?',['Git','Jira','Docker']],
+  ['Що таке «прод»?',['Середовище, яким користуються клієнти','Тестовий сервер розробника','Резервна копія бази']],
+  ['Що робить код-рев\u2019ю?',['Колега перевіряє зміни перед злиттям','Автоматично пише тести','Стискає код для швидкості']]
+];
+let quiz=null;
+function showQ(){ const q=quiz.pool[quiz.i]; quiz.order=[0,1,2].sort(()=>Math.random()-.5); $('qNum').textContent='Запитання '+(quiz.i+1)+' з 3'; $('qText').textContent=q[0];
+  [...document.querySelectorAll('.qopt')].forEach((b,k)=>{ b.textContent=(k+1)+'. '+q[1][quiz.order[k]]; b.className='qopt'; }); quiz.lock=false; }
+function startQuiz(){ hideMarker(); state='quiz'; firing=false; for(const k in keys) keys[k]=false;
+  quiz={pool:QUIZ.slice().sort(()=>Math.random()-.5).slice(0,3),i:0,ok:0,lock:false}; try{ document.exitPointerLock(); }catch(e){} showQ(); $('quiz').classList.remove('hidden'); }
+function answerQ(k){ if(!quiz||quiz.lock) return; quiz.lock=true; const good=quiz.order[k]===0; if(good) quiz.ok++;
+  const bs=[...document.querySelectorAll('.qopt')]; bs[k].classList.add(good?'good':'bad'); bs[quiz.order.indexOf(0)].classList.add('good'); beep(good?880:200,.12,.3);
+  setTimeout(()=>{ quiz.i++; if(quiz.i<3) return showQ(); $('quiz').classList.add('hidden'); const ok=quiz.ok; quiz=null; state='play'; Q.perf.quiz=ok===3;
+    if(ok>=2) missionEnd(true); else missionEnd(false,'Клієнт не оцінив демку: '+ok+' з 3.'); },1000); }
+document.querySelectorAll('.qopt').forEach(b=>b.addEventListener('click',()=>answerQ(+b.dataset.i)));
 function missionEnd(ok,why){
+  const it=M.it;
   if(ok){ let pay=M.reward; if(M.kind===1&&M.car) pay=Math.round(M.reward*(.4+.6*clamp(M.car.health,0,100)/100)/10)*10;
-    player.money+=pay; big('ЗАМОВЛЕННЯ ВИКОНАНО','+₴'+pay,'#6fe08a'); beep(660,.12,.3); beep(880,.12,.3,.12); beep(1320,.25,.3,.24); }
-  else big('ЗАМОВЛЕННЯ ПРОВАЛЕНО',why||'','#ff4d5e');
-  if(M.car){ M.car.mission=false; M.car=null; }
-  M.phase='cool'; M.t=7; M.timer=0; hideMarker(); setMission('Вільна їзда','Наступне замовлення з’явиться за мить.');
+    player.money+=pay; beep(660,.12,.3); beep(880,.12,.3,.12); beep(1320,.25,.3,.24);
+    if(it>=0){ if(it===2) Q.perf.blue=!!(M.car&&M.car.health>=80); if(it===4) Q.perf.fast=M.timer>=15;
+      Q.stage=Math.max(Q.stage,it+1); big('ЗАВДАННЯ ВИКОНАНО','+₴'+pay,'#6fe08a'); if(Q.stage>=5&&!Q.done) finale(); saveQ(); }
+    else big('ЗАМОВЛЕННЯ ВИКОНАНО','+₴'+pay,'#6fe08a'); }
+  else big(it>=0?'ЗАВДАННЯ ПРОВАЛЕНО':'ЗАМОВЛЕННЯ ПРОВАЛЕНО',(why||'')+(it>=0?' Поговоріть із колегою ще раз, щоб повторити.':''),'#ff4d5e');
+  if(M.car){ M.car.mission=false; if(M.car.ai) M.car.ai.panic=0; M.car=null; }
+  M.phase='cool'; M.t=it>=0?4:7; M.timer=0; M.it=-1; hideMarker(); setMission('Вільна їзда','Наступне завдання з\u2019явиться за мить.');
 }
 function updateMission(dt){
   const T=player.car||player, near=mark.on&&dist2(T.x,T.z,mark.x,mark.z)<16;
-  if(M.phase==='cool'){ M.t-=dt; if(M.t<=0) missionOffer(); return; }
+  if(M.phase==='cool'){ M.t-=dt; if(M.t<=0){ if(Q.done) missionOffer(); else campaignHint(); } return; }
+  if(M.phase==='wait') return;
   if(M.phase==='idle'){ if(near) missionStart(); return; }
   if(M.kind===0){
     M.timer-=dt; if(M.timer<=0) return missionEnd(false,'Час сплив');
-    if(near){ M.step++; beep(990,.1,.3); if(M.step>=M.total) return missionEnd(true); nextStop(); missionText(); }
+    if(near){ M.step++; beep(990,.1,.3); if(M.step>=M.total) return M.it===1?startQuiz():missionEnd(true); nextStop(); missionText(); }
   } else if(M.kind===1){
     if(M.car.wrecked) return missionEnd(false,'Авто знищено');
-    if(M.step===0){ setMarker(M.car.x,M.car.z,'#ff4fd8'); if(player.car===M.car){ M.step=1; const p=roadPoint(220,480); setMarker(p[0],p[1],'#38d6ff'); missionText(); } }
+    if(M.step===0){ setMarker(M.car.x,M.car.z,'#ff4fd8'); if(player.car===M.car){ M.step=1; const p=M.it===2?[nodeP(OFF.bi)+LANE,blockC(OFF.bj)]:roadPoint(220,480); setMarker(p[0],p[1],'#38d6ff'); missionText(); } }
     else if(player.car===M.car&&near&&speedOf(M.car)<6) { const c=M.car; missionEnd(true); c.keep=false; }
-  } else { if(wanted<=0) missionEnd(true); }
+  } else if(M.kind===3){ if(player.car===M.car||M.car.wrecked||M.car.health<=0) return missionEnd(true); setMarker(M.car.x,M.car.z,'#5dff7a'); }
+  else { if(wanted<=0) missionEnd(true); }
 }
 
 /* ---------- HUD ---------- */
@@ -1257,7 +1368,7 @@ function updateHud(dt){
   if(toastT>0){ toastT-=dt; }
   else { let h='';
     if(c){ if(c.fire>0) h='Авто горить! <kbd>F</kbd> — вистрибнути'; }
-    else { const q=nearNPC(); if(nearDoor()) h='<kbd>E</kbd> — '+(player.inside?'вийти з офісу':'зайти в офіс Jappware'); else if(nearCoffee()) h='<kbd>E</kbd> — випити кави'; else if(q) h='<kbd>E</kbd> — поговорити: '+q.role; else { const n=nearestCar(3.8); if(n) h='<kbd>F</kbd> — сісти в авто'; } }
+    else { const q=nearNPC(); if(nearDoor()) h='<kbd>E</kbd> — '+(player.inside?'вийти з офісу':'зайти в офіс Jappware'); else if(nearCoffee()) h='<kbd>E</kbd> — випити кави'; else if(nearStaff()) h='<kbd>E</kbd> — поговорити: '+nearStaff().name; else if(q) h='<kbd>E</kbd> — поговорити: '+q.role; else { const n=nearestCar(3.8); if(n) h='<kbd>F</kbd> — сісти в авто'; } }
     if(h){ setText('hint',h); $('hint').classList.remove('hidden'); } else $('hint').classList.add('hidden'); }
 }
 
@@ -1287,6 +1398,7 @@ function updateAudio(){ if(!AC) return; const t=AC.currentTime, c=player.car;
 const keys={}; let firing=false, dragging=false, state='menu', deadT=0;
 addEventListener('keydown',e=>{
   if(state==='menu') return;
+  if(state==='quiz'){ const m=/^(Digit|Numpad)([123])$/.exec(e.code); if(m) answerQ(+m[2]-1); return; }
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Tab'].includes(e.code)) e.preventDefault();
   if(e.repeat) return; keys[e.code]=true;
   if(e.code==='KeyF') enterExit();
@@ -1329,8 +1441,9 @@ function enterExit(){
 }
 function hurtPlayer(d){ if(state!=='play') return; player.health-=d; if(player.health<=0){ player.health=0; die('ВАМ КІНЕЦЬ','Лікарня виставила рахунок','#ff4d5e'); } }
 function die(title,sub,color){
+  if(!Q.done){ Q.perf.died=true; saveQ(); }
   state='dead'; deadT=3.2; big(title,sub,color); $('fade').style.opacity=.85; firing=false;
-  if(M.phase==='active'){ if(M.car){ M.car.mission=false; M.car=null; } M.phase='cool'; M.t=8; hideMarker(); setMission('Вільна їзда','Замовлення зірвалося. Наступне з’явиться за мить.'); }
+  if(M.phase==='active'){ if(M.car){ M.car.mission=false; M.car=null; } M.phase='cool'; M.t=8; M.it=-1; hideMarker(); setMission('Вільна їзда','Замовлення зірвалося. Наступне з’явиться за мить.'); }
 }
 function respawn(){
   if(player.car){ player.car.driver='none'; player.car=null; }
@@ -1465,7 +1578,7 @@ function tick(now){
     const el=Math.sin((tod-6)/12*Math.PI); tod=(tod+dt*(el<-.1?.055:.022))%24;
     bustNear=false;
     if(state==='play'){ updatePlayer(dt); }
-    else { deadT-=dt; if(player.car) carPhysics(player.car,0,0,true,dt); else { player.g.rotation.x=lerp(player.g.rotation.x,-Math.PI/2,Math.min(1,dt*8)); player.g.position.y=player.y+.16; } if(deadT<=0) respawn(); }
+    else if(state==='dead'){ deadT-=dt; if(player.car) carPhysics(player.car,0,0,true,dt); else { player.g.rotation.x=lerp(player.g.rotation.x,-Math.PI/2,Math.min(1,dt*8)); player.g.position.y=player.y+.16; } if(deadT<=0) respawn(); }
     if(!player.inside) updateCars(dt);
     if(player.inside){} else if(state==='play'){
       if(wanted>0&&bustNear){ bustT+=dt; if(bustT>2.2) die('ЗАТРИМАНО','Поліція забрала частину грошей','#7fb6ff'); } else bustT=Math.max(0,bustT-dt);
@@ -1497,7 +1610,7 @@ $('go').addEventListener('click',()=>{
   setMission('Вільна їзда','Навпроти офіс Jappware: зарплата, директор і HR біля входу. Натисніть E біля дверей, щоб зайти всередину.');
   try{ const p=canvas.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(_){}
 });
-window.__game={mark,player,cars,peds,M,get state(){return state;},get wanted(){return wanted;},set wanted(v){wanted=v;},set tod(v){tod=v;envT=0;},keys};
+window.__game={Q,staff,startIT,missionEnd,mark,player,cars,peds,M,get state(){return state;},get wanted(){return wanted;},set wanted(v){wanted=v;},set tod(v){tod=v;envT=0;},keys};
 requestAnimationFrame(tick);
 })();
 </script>
