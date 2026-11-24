@@ -1875,9 +1875,9 @@ function unloadCops(c){ if(c.unloaded||c.T.special) return; c.unloaded=true; con
 /* ---------- multiplayer ---------- */
 const RP={};
 const NET=(()=>{
-  const myId=Math.random().toString(36).slice(2,10); let seq=0, mode='solo', code='', status='', sendT=0, room=null, nroom=null, bc=null, peer=null, conns=[], hostConn=null, isHost=false;
+  const myId=Math.random().toString(36).slice(2,10); let seq=0, mode='solo', code='', status='', sendT=0, room=null, nroom=null, bc=null, mq=null, topic='';
   const peers={}, lastFx={}, lastHit={}, lastKb={}, lastChat={}, lastAtk={}; const hits=[], fxs=[]; let kb=null, chat=null, kills=0, deaths=0, atk=null;
-  const setStatus=t=>{ status=t; const el=document.getElementById('mpHint'); if(el&&state==='menu') el.textContent=t; };
+  const setStatus=t=>{ status=t; const el=document.getElementById('mpHint'); if(el) el.textContent=t; onlineT=0; };
   function S(){ const c=player.car, now=Date.now();
     while(hits.length&&now-hits[0].ts>2500) hits.shift(); while(fxs.length&&now-fxs[0].ts>1500) fxs.shift();
     const r2=v=>Math.round(v*100)/100;
@@ -1889,8 +1889,7 @@ const NET=(()=>{
   function sendAll(){ const st=S();
     if(nroom) nroom.presence({g:st}).catch(()=>{}); else if(room&&mode==='room') room.presence({g:st}).catch(()=>{});
     if(bc) try{ bc.postMessage(st); }catch(e){}
-    if(peer){ if(isHost){ const all=[st]; for(const id in peers) all.push(peers[id].S); for(const c of conns) if(c.open) try{ c.send({all}); }catch(e){} }
-      else if(hostConn&&hostConn.open) try{ hostConn.send({S:st}); }catch(e){} } }
+    if(mq&&mq.connected) try{ mq.publish(topic,JSON.stringify(st),{qos:0}); }catch(e){} }
   function onRoomPeers(ch){ for(const p of ch.peers){ if(p.sameTab) continue; const g=p.presence&&p.presence.g; if(g) recv(g); } }
   async function start(c){
     code=(c||'').toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,16); const C=window.claude;
@@ -1901,25 +1900,25 @@ const NET=(()=>{
       else { room.onPeers(onRoomPeers,()=>{}); setStatus('Спільна гра для всіх на цій сторінці'); }
       return; }
     if(!code){ mode='solo'; return; }
-    mode='p2p'; setStatus('Підключення до гри «'+code+'»…');
-    try{ await new Promise((ok,no)=>{ if(window.Peer) return ok(); const sc=document.createElement('script'); sc.src='https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js'; sc.onload=ok; sc.onerror=no; document.head.appendChild(sc); }); }
-    catch(e){ setStatus('Не вдалося завантажити мережевий модуль. Гра тільки між вкладками цього браузера.'); toast('Онлайн недоступний, граємо локально'); return; }
-    const hostId='jwnb-'+code;
-    const asClient=()=>{ isHost=false; peer=new window.Peer(); peer.on('open',()=>{ hostConn=peer.connect(hostId,{reliable:true});
-        hostConn.on('open',()=>{ setStatus('Ви в грі «'+code+'»'); toast('Підключено до гри «'+code+'»'); });
-        hostConn.on('data',d=>{ if(d&&Array.isArray(d.all)) for(const st of d.all.slice(0,16)) recv(st); });
-        hostConn.on('close',()=>{ toast('Хост вийшов. Перепідключаюся…'); setTimeout(()=>{ try{ peer.destroy(); }catch(e){} peer=null; tryHost(); },1500); }); });
-      peer.on('error',e=>{ if(e&&e.type==='peer-unavailable'){ try{ peer.destroy(); }catch(_){} peer=null; tryHost(); } else setStatus('Помилка мережі: '+(e&&e.type||'невідома')); }); };
-    const tryHost=()=>{ isHost=true; conns=[]; peer=new window.Peer(hostId);
-      peer.on('open',()=>{ setStatus('Ви створили гру «'+code+'». Друзі вводять той самий код'); toast('Гру «'+code+'» створено. Скажіть друзям код'); });
-      peer.on('connection',cn=>{ if(conns.length>=7){ cn.close(); return; } conns.push(cn); cn.on('data',d=>{ if(d&&d.S){ recv(d.S); cn.pid=d.S.id; } }); cn.on('close',()=>{ conns=conns.filter(x=>x!==cn); if(cn.pid) delete peers[cn.pid]; }); });
-      peer.on('error',e=>{ if(e&&e.type==='unavailable-id'){ try{ peer.destroy(); }catch(_){} peer=null; asClient(); } else if(e&&e.type!=='peer-unavailable') setStatus('Помилка мережі: '+(e.type||'невідома')); }); };
-    asClient();
+    mode='net'; setStatus('Підключення до сервера гри…');
+    try{ await new Promise((ok,no)=>{ if(window.mqtt) return ok(); const sc=document.createElement('script'); sc.src='https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js'; sc.onload=ok; sc.onerror=no; document.head.appendChild(sc); }); }
+    catch(e){ setStatus('Не вдалося завантажити мережевий модуль. Перевірте інтернет і оновіть сторінку.'); toast('Онлайн недоступний'); return; }
+    const brokers=Array.isArray(window.NB_BROKERS)?window.NB_BROKERS:['wss://broker.emqx.io:8084/mqtt','wss://broker.hivemq.com:8884/mqtt','wss://test.mosquitto.org:8081/mqtt'];
+    topic='jappware-nb/v1/'+code;
+    const tryBroker=bi=>{ if(bi>=brokers.length){ setStatus('Не вдалося підключитися до сервера гри. Спробуйте іншу мережу або пізніше.'); toast('Не вдалося підключитися до онлайн-гри'); return; }
+      let ok=false; const cl=window.mqtt.connect(brokers[bi],{clientId:'jwnb_'+myId+'_'+bi,clean:true,connectTimeout:7000,reconnectPeriod:3000,keepalive:30});
+      const fail=setTimeout(()=>{ if(!ok){ try{ cl.end(true); }catch(e){} tryBroker(bi+1); } },9000);
+      cl.on('connect',()=>{ const first=!ok; ok=true; clearTimeout(fail); mq=cl; cl.subscribe(topic,{qos:0}); setStatus('Підключено · гра «'+code+'»'); if(first) toast('Підключено до гри «'+code+'»'); });
+      cl.on('message',(t,buf)=>{ if(t!==topic) return; let st=null; try{ st=JSON.parse(buf.toString()); }catch(e){ return; } recv(st); });
+      cl.on('offline',()=>{ if(ok) setStatus('Зв’язок втрачено, перепідключаюся…'); });
+      cl.on('reconnect',()=>{ if(ok) setStatus('Перепідключення…'); });
+      cl.on('error',()=>{}); };
+    tryBroker(0);
   }
   function hit(to,d){ hits.push({i:++seq,to,d:Math.round(d*10)/10,ts:Date.now()}); if(hits.length>8) hits.shift(); }
   function fx(t,a){ if(mode==='solo'&&!bc) return; fxs.push({i:++seq,t,a:a.map(v=>Math.round(v*100)/100),ts:Date.now()}); if(fxs.length>10) fxs.shift(); }
   function process(dt){
-    sendT-=dt; if(sendT<=0){ sendT=.066; sendAll(); }
+    sendT-=dt; if(sendT<=0){ sendT=mode==='net'?.1:.066; sendAll(); }
     const now=Date.now();
     for(const id in peers){ const P=peers[id], st=P.S; if(now-P.t>6000){ delete peers[id]; dropRemote(id); continue; }
       const lf=lastFx[id]||0; let mf=lf; for(const f of (Array.isArray(st.fx)?st.fx:[])){ if(!(f.i>lf)) continue; mf=Math.max(mf,f.i); const a=f.a||[];
@@ -1935,7 +1934,7 @@ const NET=(()=>{
   function died(){ deaths++; if(lastBy&&Date.now()-lastByT<5000&&peers[lastBy]){ kb={i:++seq,by:lastBy}; const n=peers[lastBy].S.n||'гравець'; lastBy=null; return n; } return null; }
   function say(t){ t=String(t).replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g,'').trim().slice(0,120); if(!t) return; chat={i:++seq,t}; chatLine(PNAME,t,true); }
   function atkSend(kick,side){ atk={i:++seq,k:kick?1:0,s:side}; }
-  return {start,process,hit,fx,died,say,atk:atkSend,peers,get myId(){return myId;},get mode(){return mode;},get code(){return code;},get kills(){return kills;},get deaths(){return deaths;},get online(){ return mode!=='solo'||!!bc; }};
+  return {start,process,hit,fx,died,say,atk:atkSend,peers,get status(){return status;},get myId(){return myId;},get mode(){return mode;},get code(){return code;},get kills(){return kills;},get deaths(){return deaths;},get online(){ return mode!=='solo'||!!bc; }};
 })();
 function boomFx(x,y,z){ for(let i=0;i<22;i++) particle(x,y+1,z,'boom'); for(let i=0;i<10;i++) particle(x,y+1.5,z,'smoke'); flash.position.set(x,y+3,z); flash.intensity=12;
   const d=Math.hypot(x-player.x,z-player.z); sfxNoise(1.1,260,clamp(.9-d/300,.08,.9)); scareBirds(x,z,60); }
@@ -1976,6 +1975,7 @@ let onlineT=0;
 function updateOnline(){ onlineT-=1; if(onlineT>0) return; onlineT=20; const el=$('online'); const ids=Object.keys(NET.peers);
   if(!NET.online||state==='menu'){ el.classList.add('hidden'); return; } el.classList.remove('hidden'); el.textContent='';
   const t=document.createElement('b'); t.textContent='ОНЛАЙН · '+(ids.length+1)+(NET.code?' · '+NET.code:''); el.appendChild(t);
+  if(NET.status){ const st=document.createElement('div'); st.style.cssText='color:#a9adba;font-size:12px'; st.textContent=NET.status; el.appendChild(st); }
   const me=document.createElement('div'); me.className='me'; me.textContent=PNAME+' (ви)'; el.appendChild(me);
   for(const id of ids.slice(0,8)){ const d=document.createElement('div'); d.textContent=String(NET.peers[id].S.n||'Гравець').slice(0,20); el.appendChild(d); } }
 function showBoard(on){ const el=$('board'); if(!on||!NET.online){ el.classList.add('hidden'); return; } el.classList.remove('hidden'); el.textContent='';
@@ -2105,7 +2105,7 @@ function trackScore(dt){ if(player.money<=peak) return; peak=player.money; score
     SCORES.sort((a,b)=>b.money-a.money); SCORES=SCORES.slice(0,10); try{ localStorage.setItem('nb.scores',JSON.stringify(SCORES)); }catch(e){}
     if(wasTop&&SCORES[0]===r&&SCORES.length>1) toast('Новий рекорд: '+fmt(peak)+'!'); renderRecords(); } }
 $('pname').value=PNAME; renderChars(); renderRecords();
-$('mpHint').textContent=(window.claude&&typeof window.claude.use==='function')?'Усі, хто відкрив цю сторінку в Claude, грають разом. Введіть код, щоб грати окремою компанією.':'Введіть однаковий код із друзями: перший створює гру, інші приєднуються. Порожньо — гра наодинці.';
+$('mpHint').textContent=(window.claude&&typeof window.claude.use==='function')?'Усі, хто відкрив цю сторінку в Claude, грають разом. Введіть код, щоб грати окремою компанією.':'Введіть однаковий код із друзями, і ви опинитеся в одному місті. Порожньо — гра наодинці.';
 try{ $('mpCode').value=(localStorage.getItem('nb.code')||'').slice(0,16); }catch(e){}
 $('mpCode').addEventListener('change',()=>{ try{ localStorage.setItem('nb.code',$('mpCode').value.slice(0,16)); }catch(e){} }); if(CH!==CHARS[0]) buildPlayer(CH);
 function finale(){ const p=Q.perf, items=[['Кампанію пройдено',true],['Демка: три правильні відповіді з трьох',!!p.quiz],['Голубе авто без подряпин',!!p.blue],['Реліз із запасом часу',!!p.fast],['Без лікарні й затримань',!p.died]];
